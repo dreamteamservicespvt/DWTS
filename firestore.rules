@@ -1,0 +1,161 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return request.auth.uid == userId;
+    }
+    
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+    
+    function isAdmin() {
+      return isAuthenticated() && getUserData().role == 'admin';
+    }
+    
+    function isManager() {
+      return isAuthenticated() && (getUserData().role == 'admin' || getUserData().role == 'manager');
+    }
+    
+    function isSystemAdmin() {
+      return isAuthenticated() && getUserData().get('isSystemAdmin', false) == true;
+    }
+    
+    // Users collection
+    match /users/{userId} {
+      // Anyone authenticated can read their own profile and admins can read all
+      allow read: if isAuthenticated() && (isOwner(userId) || isAdmin());
+      
+      // Users can update their own profile (except role and permissions)
+      allow update: if isAuthenticated() && isOwner(userId) && 
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'permissions', 'isSystemAdmin', 'uid']);
+      
+      // Only admins can create users and set roles
+      allow create: if isAdmin();
+      
+      // System admin cannot be deleted
+      allow delete: if isAdmin() && !resource.data.get('isSystemAdmin', false);
+    }
+    
+    // Clients collection
+    match /clients/{clientId} {
+      allow read: if isAuthenticated();
+      allow create: if isAdmin();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+    
+    // Projects collection
+    match /projects/{projectId} {
+      allow read: if isAuthenticated();
+      allow create: if isAdmin();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+    
+    // Tasks collection - complex rules
+    match /tasks/{taskId} {
+      // Read access: assigned user, admin, or team members
+      allow read: if isAuthenticated() && (
+        resource.data.assignedTo == request.auth.uid ||
+        isAdmin() ||
+        isManager()
+      );
+      
+      // Create: only admins and managers
+      allow create: if isManager() && 
+        request.resource.data.keys().hasAll(['title', 'clientId', 'assignedTo', 'status', 'createdAt']) &&
+        request.resource.data.status in ['Not Started', 'In Progress', 'Submitted', 'Approved', 'Rework', 'Blocked'] &&
+        request.resource.data.impact in ['Low', 'Medium', 'High', 'Critical'];
+      
+      // Update rules
+      allow update: if isAuthenticated() && (
+        // Admins can update anything
+        isAdmin() ||
+        // Assigned user can update specific fields only
+        (resource.data.assignedTo == request.auth.uid && 
+         onlyAllowedFieldsForMember())
+      );
+      
+      // Delete: only admins
+      allow delete: if isAdmin();
+      
+      // Helper for member updates
+      function onlyAllowedFieldsForMember() {
+        let allowedFields = ['status', 'progressPercent', 'attachments', 'comments', 'updatedAt'];
+        let changedFields = request.resource.data.diff(resource.data).affectedKeys();
+        return changedFields.hasOnly(allowedFields) &&
+          // Can't approve own tasks
+          !(changedFields.hasAny(['verifiedBy', 'verifiedAt', 'rating'])) &&
+          // Can't change assignment
+          request.resource.data.assignedTo == resource.data.assignedTo;
+      }
+    }
+    
+    // Assigned Work collection - new feature
+    match /assignedWork/{workId} {
+      // Read access: assigned members or admin
+      allow read: if isAuthenticated() && (
+        request.auth.uid in resource.data.assignedTo ||
+        isAdmin()
+      );
+      
+      // Create: only admins
+      allow create: if isAdmin();
+      
+      // Update: admin can update anything, members can update their submissions and comments
+      allow update: if isAuthenticated() && (
+        isAdmin() ||
+        (request.auth.uid in resource.data.assignedTo && 
+         onlyAllowedFieldsForAssignedMember())
+      );
+      
+      // Delete: only admins
+      allow delete: if isAdmin();
+      
+      // Helper for member updates on assigned work
+      function onlyAllowedFieldsForAssignedMember() {
+        let allowedFields = ['status', 'submissions', 'comments', 'activityLog', 'updatedAt', 'startedAt', 'submittedAt'];
+        let changedFields = request.resource.data.diff(resource.data).affectedKeys();
+        return changedFields.hasOnly(allowedFields) &&
+          // Can't change assignment
+          request.resource.data.assignedTo == resource.data.assignedTo &&
+          // Can't change admin feedback or completion
+          !(changedFields.hasAny(['adminFeedback', 'completedAt', 'assignedBy']));
+      }
+    }
+    
+    // Activity Log - append only, admins can read
+    match /activityLog/{logId} {
+      allow read: if isAdmin();
+      allow create: if isAuthenticated();
+      allow update, delete: if false; // Immutable
+    }
+    
+    // Notifications
+    match /notifications/{notificationId} {
+      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
+    }
+    
+    // Summaries (AI insights)
+    match /summaries/{userId}/{summaryId} {
+      allow read: if isAuthenticated() && (isOwner(userId) || isAdmin());
+      allow create, update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+    
+    // Offline queue (temporary, auto-cleanup)
+    match /offlineQueue/{queueId} {
+      allow read, write: if isAuthenticated() && resource.data.userId == request.auth.uid;
+    }
+  }
+}

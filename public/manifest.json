@@ -1,0 +1,22 @@
+{
+  "name": "DWTS AI - Dream Team Work Tracker",
+  "short_name": "DWTS AI",
+  "description": "AI that tracks, motivates, and speaks your language.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#F7F9FC",
+  "theme_color": "#0057FF",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["productivity", "business", "utilities"],
+  "lang": "en-US",
+  "dir": "ltr",
+  "prefer_related_applications": false
+}
