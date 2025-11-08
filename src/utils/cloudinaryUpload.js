@@ -40,8 +40,14 @@ export const uploadToCloudinary = async (file, onProgress = null, options = {}) 
     throw new Error(`File size must be less than ${maxSize / (1024 * 1024)}MB`);
   }
 
-  const cloudName = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME;
-  const uploadPreset = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET;
+  // Fallback configuration for production
+  const productionCloudinaryConfig = {
+    cloudName: 'do46xxegj',
+    uploadPreset: 'dwtsystem'
+  };
+
+  const cloudName = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME || productionCloudinaryConfig.cloudName;
+  const uploadPreset = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET || productionCloudinaryConfig.uploadPreset;
 
   if (!cloudName || !uploadPreset) {
     throw new Error('Cloudinary configuration missing. Please check your .env file.');
